@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "doc-brd": {
+      "source": "vladm3105/aidoc-flow-framework",
+      "sourceType": "github",
+      "computedHash": "ecef0cba86064e8fcc340e4f7170cb19b7c18f1bf4403aeaa686b33c960b2706"
+    }
+  }
+}

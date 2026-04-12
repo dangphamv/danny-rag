@@ -1,0 +1,40 @@
+danny_rag — sample document for ingestion smoke testing.
+
+This file exists so the ingestion CLI has something to chew on without
+needing a real PDF. It is intentionally small but multi-paragraph so
+the chunker produces at least two chunks at the default 512-token /
+64-overlap settings.
+
+## Section 1 — RAG basics
+
+Retrieval-Augmented Generation (RAG) is a pattern where a large language
+model answers questions using context retrieved at query time, rather
+than relying solely on its parametric memory. The retrieval step pulls
+relevant document chunks from a vector store, and the generator is asked
+to ground its answer in those chunks. This separation makes the system
+auditable: every claim in the answer can in principle be traced back to
+a source chunk.
+
+## Section 2 — Why hybrid search
+
+Pure dense retrieval misses keyword-heavy queries. Pure sparse (BM25)
+retrieval misses paraphrase-heavy queries. Combining both via Reciprocal
+Rank Fusion (RRF) catches both classes — and a cross-encoder reranker
+on the fused top-50 produces the final top-5 with much higher precision
+than either retriever alone. This is the canonical hybrid stack used in
+modern production RAG systems.
+
+## Section 3 — Why this file exists
+
+When you ran `uv run ingest data/sample.txt`, the pipeline:
+
+1. Loaded this file as text.
+2. Split it into chunks of ~512 tokens with 64-token overlap.
+3. Computed a sha256 content hash per chunk.
+4. Embedded each chunk with text-embedding-3-small (1536-d).
+5. Upserted the vectors to the Qdrant collection
+   `chunks_text-embedding-3-small`, keyed by a deterministic UUIDv5 of
+   `doc_id:chunk_index`.
+
+If you re-run the command, the second pass should report
+`upserted=0 skipped_unchanged=N` — that's MTC-02 (idempotency) working.

@@ -1,0 +1,99 @@
+name: eval
+
+# Phase 7a: nightly DeepEval run, advisory only.
+# Phase 7b: drop `continue-on-error: true` to make Faithfulness + Hallucination
+# blocking CI gates per BRD-01 §3.7 MTC-05.
+
+on:
+  schedule:
+    - cron: "0 7 * * *"  # 07:00 UTC nightly
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "apps/api/src/retrieval/**"
+      - "apps/api/src/graph/**"
+      - "apps/api/src/llm/**"
+      - "apps/api/src/ingestion/chunker.py"
+      - "apps/api/src/ingestion/pipeline.py"
+      - "apps/api/evals/**"
+
+jobs:
+  deepeval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports:
+          - 6333:6333
+          - 6334:6334
+        options: >-
+          --health-cmd "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      QDRANT_URL: http://localhost:6333
+      LLM_PROVIDER: anthropic
+      EMBED_PROVIDER: openai
+      API_KEY: ci-eval-key
+      ALLOWED_ORIGINS: http://localhost:3000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: latest
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install api deps
+        working-directory: apps/api
+        run: uv sync --dev
+
+      - name: Wait for Qdrant readyz
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:6333/readyz; then
+              echo "qdrant ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "qdrant did not become ready in time"
+          exit 1
+
+      - name: Ingest sample doc
+        working-directory: apps/api
+        run: uv run python -m src.ingestion.cli ../../data/sample.txt
+
+      - name: Run DeepEval suite (Phase 7a — advisory)
+        id: deepeval
+        working-directory: apps/api
+        continue-on-error: true  # PHASE 7A — drop this in 7b
+        run: |
+          uv run pytest evals/ -v --tb=short \
+            --junitxml=eval-report.xml
+
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: apps/api/eval-report.xml
+          retention-days: 30
+
+      - name: Open issue on regression (Phase 7b only — disabled now)
+        if: false  # enable when Phase 7b lands
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Auto-open an issue if the eval suite regressed.
+            // Implement when Phase 7b is active.

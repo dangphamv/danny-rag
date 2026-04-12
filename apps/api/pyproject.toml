@@ -1,0 +1,68 @@
+[project]
+name = "danny-rag-api"
+version = "0.1.0"
+description = "RAG knowledge chatbot backend — FastAPI + LangGraph + Qdrant + Langfuse"
+requires-python = ">=3.12"
+authors = [{ name = "Danny Pham" }]
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "python-multipart>=0.0.12",
+    "httpx>=0.28",
+    "anthropic>=0.40",
+    "openai>=1.50",
+    "qdrant-client>=1.12",
+    "langchain>=0.3",
+    "langchain-community>=0.3",
+    "langchain-text-splitters>=0.3",
+    "langchain-anthropic>=0.2",
+    "langchain-openai>=0.2",
+    "langchain-ollama>=0.2",
+    "langgraph>=0.2",
+    "langgraph-checkpoint-postgres>=2.0",
+    "rank-bm25>=0.2.2",
+    "sentence-transformers>=3.0",
+    "unstructured[pdf,md]>=0.16",
+    "beautifulsoup4>=4.12",
+    "tiktoken>=0.8",
+    "langfuse>=3.0",
+    "slowapi>=0.1.9",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.7",
+    "mypy>=1.13",
+    "deepeval>=2.0",
+    "types-requests",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF", "ASYNC"]
+ignore = ["E501"]  # let formatter handle line length
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+files = ["src"]
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+disallow_untyped_decorators = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

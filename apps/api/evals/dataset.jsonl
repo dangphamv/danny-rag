@@ -1,0 +1,17 @@
+{"id": "ext-01", "category": "extractive", "question": "What does RAG stand for?", "expected_answer": "Retrieval-Augmented Generation"}
+{"id": "ext-02", "category": "extractive", "question": "What does RRF stand for?", "expected_answer": "Reciprocal Rank Fusion"}
+{"id": "ext-03", "category": "extractive", "question": "What chunk size does the ingestion pipeline use?", "expected_answer": "512 tokens"}
+{"id": "ext-04", "category": "extractive", "question": "What is the chunk overlap used by the pipeline?", "expected_answer": "64 tokens"}
+{"id": "ext-05", "category": "extractive", "question": "Which embedding model does the pipeline use?", "expected_answer": "text-embedding-3-small"}
+{"id": "ext-06", "category": "extractive", "question": "How many dimensions do the embeddings have?", "expected_answer": "1536"}
+{"id": "ext-07", "category": "extractive", "question": "What hash function is computed per chunk?", "expected_answer": "sha256"}
+{"id": "ext-08", "category": "extractive", "question": "What vector store does the pipeline use?", "expected_answer": "Qdrant"}
+{"id": "ext-09", "category": "extractive", "question": "What is the name of the Qdrant collection used by the pipeline?", "expected_answer": "chunks_text-embedding-3-small"}
+{"id": "ext-10", "category": "extractive", "question": "What does the second ingestion run report when content is unchanged?", "expected_answer": "upserted=0 skipped_unchanged=N"}
+{"id": "mh-01", "category": "multi-hop", "question": "Why does this project use hybrid search instead of pure dense retrieval?", "expected_answer": "Pure dense retrieval misses keyword-heavy queries while pure sparse (BM25) misses paraphrase-heavy queries; combining both via Reciprocal Rank Fusion catches both classes."}
+{"id": "mh-02", "category": "multi-hop", "question": "What property of the RAG pattern makes the system auditable?", "expected_answer": "Every claim in the answer can in principle be traced back to a source chunk via the retrieval step."}
+{"id": "mh-03", "category": "multi-hop", "question": "What is the role of the cross-encoder reranker in the retrieval stack?", "expected_answer": "It reranks the fused top-50 candidates to produce a final top-5 with much higher precision than either retriever alone."}
+{"id": "ref-01", "category": "out-of-scope", "question": "What is the capital of France?", "expected_refusal": true}
+{"id": "ref-02", "category": "out-of-scope", "question": "Who won the 2024 FIFA World Cup?", "expected_refusal": true}
+{"id": "ref-03", "category": "out-of-scope", "question": "How do I deploy this application to a Kubernetes cluster?", "expected_refusal": true}
+{"id": "ref-04", "category": "out-of-scope", "question": "What is the current price of Tesla stock?", "expected_refusal": true}

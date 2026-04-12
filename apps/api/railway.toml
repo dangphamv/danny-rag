@@ -1,0 +1,18 @@
+# Railway service config for the FastAPI backend.
+# Railway auto-detects the Dockerfile in this directory; this file just adds
+# deploy-time settings (healthcheck, restart policy).
+#
+# Set the project's "Root Directory" to apps/api in the Railway dashboard so
+# Railway only watches and builds this subtree of the monorepo.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# Railway injects $PORT — the Dockerfile CMD reads it.
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+numReplicas = 1

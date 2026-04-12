@@ -1,0 +1,32 @@
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+.uv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+.deepeval_cache/
+.cache/
+huggingface/
+
+# Local data + secrets
+.env
+.env.*
+data/
+
+# Tests + evals — runtime image doesn't need them
+tests/
+evals/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
