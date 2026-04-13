@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
+from src.observability.redact import hash_text
 from src.retrieval.dense import dense_search
 from src.retrieval.hybrid import hybrid_search
 from src.retrieval.rerank import rerank as rerank_chunks
@@ -31,7 +32,14 @@ async def search(
     rerank: Annotated[bool, Query(description="Apply cross-encoder rerank (default true)")] = True,
     _: None = Depends(require_api_key),
 ) -> SearchResponse:
-    log.info("search q=%r top_k=%d fan_out=%d hybrid=%s rerank=%s", q, top_k, fan_out, hybrid, rerank)
+    log.info(
+        "search q=%s top_k=%d fan_out=%d hybrid=%s rerank=%s",
+        hash_text(q),
+        top_k,
+        fan_out,
+        hybrid,
+        rerank,
+    )
 
     if hybrid:
         candidates = await hybrid_search(q, top_k=fan_out)

@@ -1,0 +1,16 @@
+# Vercel only builds apps/web. Exclude the Python backend, docs, data,
+# and all node_modules (Vercel reinstalls). See docs/DEPLOY.md for the split.
+apps/api/
+docs/
+data/
+.claude/
+.playwright-mcp/
+**/node_modules/
+**/.next/
+**/.turbo/
+**/.venv/
+.git/
+*.log
+.env
+.env.*
+*.secret

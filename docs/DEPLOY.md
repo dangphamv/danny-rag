@@ -168,7 +168,9 @@ Open `https://danny-rag-web.vercel.app` in a browser. Ask a question grounded in
 1. Tokens stream in
 2. The sources panel populates with chunks from your ingested documents
 3. The grounding score badge appears (M10 self-grading)
-4. Open Langfuse at the URL from step 2 — no traces yet (the Langfuse callback isn't wired into the graph yet — see "Known gaps" below)
+4. Open Langfuse at the URL from step 2 — the newest trace has a single `chat-turn` root span with children `rewrite_query → retrieve → rerank → generate → self_grade`, plus nested `anthropic.astream` / `openai.generate` / `ollama.generate` generation spans from the provider `@observe()` decorators. Tags match `env` + `llm_provider`; `session_id` groups the conversation.
+
+   **Expected — the `input` and `output` blobs on every span read `<redacted>`.** This is the PII redaction layer, not a bug. See "PII posture in production" below.
 
 ## Step 7 — Spend alerts (manual checklist, mandatory per BRD-01 §10 R1)
 
@@ -193,15 +195,25 @@ Set them in **Settings → Secrets and variables → Actions**.
 - **Vercel web**: any push to `main` triggers a build; PRs get preview URLs
 - **Eval workflow**: nightly cron at 07:00 UTC + on PRs touching retrieval/graph/llm/ingestion paths
 
+## PII posture in production
+
+Free-text (user questions, rewritten queries, retrieved context, model answers) never lands in Langfuse or stdout verbatim. Two layers enforce this — both are on by default and require no env flags:
+
+1. **Global Langfuse mask.** `apps/api/src/observability/langfuse.py` constructs the Langfuse client with `mask=mask_payload`. `apps/api/src/observability/redact.py:mask_payload()` replaces every span `input` / `output` with the literal string `<redacted>`. Token usage, model names, span shape, scores, and timings are untouched.
+2. **`@observe(capture_input=False, capture_output=False)`** on every provider `generate` / `astream` in `llm/anthropic.py`, `llm/openai.py`, `llm/ollama.py`. The decorator never hands the messages list or the generated string to Langfuse — defense in depth if the `mask` hook ever regresses.
+3. **Log-side hashing.** `routes/chat.py`, `routes/search.py`, and `graph/nodes.py:rewrite_query` log `hash_text(q)` (`sha256:<12 hex>:len=<n>`) in place of `%r`, so the Railway log drain can't exfiltrate the raw prompt either.
+
+Operational consequence: **when you debug a prod trace, you will not see the question or answer in the Langfuse UI.** Correlate via `session_id` (which still groups the conversation) and the `q_hash` field on the `chat-turn` root span, both of which appear in the Railway API logs alongside the same `hash_text` value. The `security-auditor` subagent checks this layer as part of the MTC-07 audit.
+
 ## Known gaps to fix in a follow-up deploy
 
 These are open issues you'll hit but aren't blockers for getting the prod URL working:
 
-1. ~~Langfuse callback not yet wired into the LangGraph execution~~ ✅ **Fixed.** `chat.py:_build_graph_config()` constructs a `{"callbacks": [CallbackHandler()], "metadata": {...}}` config and passes it to `graph.astream()`. Per-node spans appear automatically. LLM-call spans come from `@observe()` decorators on `AnthropicProvider`/`OpenAIProvider`/`OllamaProvider` `generate`/`astream`. Traces are tagged with `langfuse_session_id`, env, and llm_provider for filtering.
-2. **`numReplicas = 1` in `railway.toml`** — single-replica limits the in-process semaphore (MTC-09) to 2 concurrent ingestions globally. If you scale to 2+ replicas, the semaphore becomes per-replica → 4 total. ADR-0010 mitigation triggers note this; move the semaphore to Redis if you scale out.
-3. **Qdrant Cloud free tier** caps at 1 GB. ~500k chunks at 1536d. The `/qdrant-status` slash command shows current usage.
-4. **Postgres checkpointer is wired but inactive**. Sessions don't survive Railway restarts. To activate: pass `checkpointer=AsyncPostgresSaver(...)` to `get_compiled_graph()` and add a `POSTGRES_URL` env var pointing at the Langfuse Postgres instance (re-uses the shared instance per ADR-0010).
-5. **BRD v1.2 update for Langfuse v3** — the BRD §7.2 BRD.01.3205 still says "single-binary Railway deploy" which was true for Langfuse v2 but is wrong for v3. The runbook above documents the v3 reality; the BRD should be bumped to match. Flagged in ADR-0009.
+1. **`numReplicas = 1` in `railway.toml`** — single-replica limits the in-process semaphore (MTC-09) to 2 concurrent ingestions globally. If you scale to 2+ replicas, the semaphore becomes per-replica → 4 total. ADR-0010 mitigation triggers note this; move the semaphore to Redis if you scale out.
+2. **Qdrant Cloud free tier** caps at 1 GB. ~500k chunks at 1536d. The `/qdrant-status` slash command shows current usage.
+3. **Postgres checkpointer is wired but inactive.** Sessions don't survive Railway restarts. To activate: pass `checkpointer=AsyncPostgresSaver(...)` to `get_compiled_graph()` and add a `POSTGRES_URL` env var pointing at the Langfuse Postgres instance (re-uses the shared instance per ADR-0010).
+4. **BRD v1.2 update for Langfuse v3** — the BRD §7.2 BRD.01.3205 still says "single-binary Railway deploy" which was true for Langfuse v2 but is wrong for v3. The runbook above documents the v3 reality; the BRD should be bumped to match. Flagged in ADR-0009.
+5. **PDF partitioning pulls OpenCV transitively.** The runtime image installs `libgl1` + `libglib2.0-0` (see Dockerfile:45-46) because `unstructured` → `cv2` needs `libGL.so.1`. If you ever swap `unstructured` for a lighter loader, you can drop these two packages and shave ~40 MB off the image.
 
 ## Rollback
 

@@ -1,4 +1,13 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(/Users/dangpham/project/danny-rag/apps/api/.venv/bin/python -c \"import json; print\\(json.load\\(open\\('/Users/dangpham/.railway/config.json'\\)\\)['user']['token']\\)\")",
+      "Bash(curl -sS -X POST https://backboard.railway.app/graphql/v2 -H 'Authorization: Bearer __TRACKED_VAR__' -H 'Content-Type: application/json' -d '{\"query\":\"{ me { workspaces { id name team { id projects { edges { node { id name } } } } } } }\"}')",
+      "Bash(/Users/dangpham/project/danny-rag/apps/api/.venv/bin/python -m json.tool)",
+      "Bash(/Users/dangpham/project/danny-rag/apps/api/.venv/bin/python -c ':*)",
+      "Bash(grep -A 5 \"def test\\\\|class Test\" /Users/dangpham/project/danny-rag/apps/api/tests/*.py)"
+    ]
+  },
   "enabledMcpjsonServers": [
     "context7",
     "postgres",
