@@ -21,9 +21,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python deps first so this layer caches across source changes.
 COPY pyproject.toml uv.lock* ./
-RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project || \
-    uv sync --no-dev --no-install-project
+RUN uv sync --frozen --no-dev --no-install-project \
+    || uv sync --no-dev --no-install-project
 
 # Copy source.
 COPY src/ ./src/
