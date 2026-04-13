@@ -36,9 +36,14 @@ RUN /app/.venv/bin/python -c "from sentence_transformers import CrossEncoder; Cr
 FROM python:3.12-slim-bookworm AS runtime
 
 # Runtime-only system deps. Builder packages (build-essential, etc.) stay behind.
+# libgl1 + libglib2.0-0 are transitively required by cv2 (opencv), which
+# unstructured pulls in for PDF partitioning. Without them, any PDF upload
+# crashes with `ImportError: libGL.so.1: cannot open shared object file`.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libmagic1 \
         poppler-utils \
+        libgl1 \
+        libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 1000 app
 
