@@ -2,16 +2,18 @@ import json
 import logging
 import uuid
 from collections.abc import AsyncIterator
+from contextlib import ExitStack
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
+from langfuse import propagate_attributes
 from pydantic import BaseModel, Field
 from starlette.responses import StreamingResponse
 
 from src.config import get_settings
 from src.graph.build import get_compiled_graph
 from src.limits import limiter
-from src.observability.langfuse import get_callback_handler
+from src.observability.langfuse import get_callback_handler, get_langfuse
 from src.security import require_api_key
 
 log = logging.getLogger(__name__)
@@ -31,47 +33,52 @@ def _sse(event: dict[str, Any]) -> str:
     return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
 
-def _build_graph_config(session_id: str) -> dict[str, Any] | None:
-    """Build the LangGraph invocation config with the Langfuse callback + tags.
-
-    Returns None when Langfuse is not configured so we don't pass an empty
-    callbacks list. The chat path still works without observability.
-    """
-    handler = get_callback_handler()
-    if handler is None:
-        return None
-    settings = get_settings()
-    return {
-        "callbacks": [handler],
-        "metadata": {
-            "langfuse_session_id": session_id,
-            "langfuse_user_id": "anonymous",
-            "langfuse_tags": [settings.env, settings.llm_provider],
-        },
-    }
-
-
 async def _event_stream(question: str, session_id: str) -> AsyncIterator[str]:
     graph = get_compiled_graph()
     initial = {"question": question, "session_id": session_id, "rewrite_count": 0}
-    config = _build_graph_config(session_id)
+
+    settings = get_settings()
+    handler = get_callback_handler()
+    lf = get_langfuse()
 
     yield _sse({"type": "start", "session_id": session_id})
 
-    try:
-        # stream_mode="custom" surfaces writer({...}) emissions from nodes to
-        # the SSE response. The Langfuse handler attached via `config` produces
-        # a parallel stream of trace events that go directly to Langfuse.
-        if config is not None:
-            stream = graph.astream(initial, stream_mode="custom", config=config)
-        else:
-            stream = graph.astream(initial, stream_mode="custom")
-        async for chunk in stream:
-            yield _sse(chunk)
-    except Exception as exc:
-        log.exception("graph stream failed")
-        yield _sse({"type": "error", "message": str(exc)})
-        return
+    # Langfuse v4 requires an enclosing OTEL span for the LangChain
+    # CallbackHandler + @observe() decorators to share a trace context. Without
+    # it, each provider.generate() / provider.astream() creates its own root
+    # trace and session/tags never attach. See propagate_attributes docstring
+    # in langfuse/_client/propagation.py.
+    with ExitStack() as stack:
+        if lf is not None:
+            stack.enter_context(
+                lf.start_as_current_observation(
+                    name="chat-turn",
+                    input={"question": question},
+                )
+            )
+            stack.enter_context(
+                propagate_attributes(
+                    session_id=session_id,
+                    user_id="anonymous",
+                    tags=[settings.env, settings.llm_provider],
+                )
+            )
+
+        config: dict[str, Any] | None = (
+            {"callbacks": [handler]} if handler is not None else None
+        )
+
+        try:
+            if config is not None:
+                stream = graph.astream(initial, stream_mode="custom", config=config)
+            else:
+                stream = graph.astream(initial, stream_mode="custom")
+            async for chunk in stream:
+                yield _sse(chunk)
+        except Exception as exc:
+            log.exception("graph stream failed")
+            yield _sse({"type": "error", "message": str(exc)})
+            return
 
     yield _sse({"type": "done"})
     yield "data: [DONE]\n\n"
