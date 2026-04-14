@@ -14,7 +14,6 @@ from src.config import get_settings
 from src.graph.build import get_compiled_graph
 from src.limits import limiter
 from src.observability.langfuse import get_callback_handler, get_langfuse
-from src.observability.redact import hash_text
 from src.security import require_api_key
 
 log = logging.getLogger(__name__)
@@ -54,7 +53,7 @@ async def _event_stream(question: str, session_id: str) -> AsyncIterator[str]:
             stack.enter_context(
                 lf.start_as_current_observation(
                     name="chat-turn",
-                    input={"q_hash": hash_text(question)},
+                    input={"question": question},
                 )
             )
             stack.enter_context(
@@ -93,7 +92,7 @@ async def chat(
     _: None = Depends(require_api_key),  # MTC-07
 ) -> StreamingResponse:
     session_id = body.session_id or str(uuid.uuid4())
-    log.info("chat session=%s q=%s", session_id, hash_text(body.question))
+    log.info("chat session=%s q=%r", session_id, body.question)
     return StreamingResponse(
         _event_stream(body.question, session_id),
         media_type="text/event-stream",

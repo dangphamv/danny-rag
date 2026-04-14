@@ -47,7 +47,7 @@ class OpenAIProvider:
     def model_name(self) -> str:
         return self._model
 
-    @observe(name="openai.generate", capture_input=False, capture_output=False)
+    @observe(name="openai.generate")
     async def generate(self, messages: list[Message], max_tokens: int = HARD_MAX_TOKENS) -> str:
         resp = await self._client.chat.completions.create(
             model=self._model,
@@ -56,7 +56,7 @@ class OpenAIProvider:
         )
         return resp.choices[0].message.content or ""
 
-    @observe(name="openai.astream", capture_input=False, capture_output=False)
+    @observe(name="openai.astream")
     async def astream(
         self,
         messages: list[Message],

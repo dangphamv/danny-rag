@@ -5,7 +5,6 @@ from langfuse import Langfuse
 from langfuse.langchain import CallbackHandler
 
 from src.config import get_settings
-from src.observability.redact import mask_payload
 
 log = logging.getLogger(__name__)
 
@@ -20,7 +19,6 @@ def get_langfuse() -> Langfuse | None:
         public_key=settings.langfuse_public_key.get_secret_value(),
         secret_key=settings.langfuse_secret_key.get_secret_value(),
         host=settings.langfuse_host,
-        mask=mask_payload,
     )
     log.info("Langfuse client initialized: host=%s", settings.langfuse_host)
     return client

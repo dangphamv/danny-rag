@@ -50,7 +50,7 @@ class AnthropicProvider:
         except Exception as exc:
             log.debug("langfuse update_current_generation failed: %s", exc)
 
-    @observe(as_type="generation", name="anthropic.generate", capture_input=False, capture_output=False)
+    @observe(as_type="generation", name="anthropic.generate")
     async def generate(self, messages: list[Message], max_tokens: int = HARD_MAX_TOKENS) -> str:
         system, rest = self._split(messages)
         capped = min(max_tokens, HARD_MAX_TOKENS)
@@ -70,7 +70,7 @@ class AnthropicProvider:
         self._record_usage(resp.usage.input_tokens, resp.usage.output_tokens)
         return "".join(block.text for block in resp.content if hasattr(block, "text"))
 
-    @observe(as_type="generation", name="anthropic.astream", capture_input=False, capture_output=False)
+    @observe(as_type="generation", name="anthropic.astream")
     async def astream(
         self,
         messages: list[Message],

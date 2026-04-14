@@ -48,7 +48,7 @@ class OllamaProvider:
     def model_name(self) -> str:
         return self._model
 
-    @observe(name="ollama.generate", capture_input=False, capture_output=False)
+    @observe(name="ollama.generate")
     async def generate(self, messages: list[Message], max_tokens: int = HARD_MAX_TOKENS) -> str:
         async with httpx.AsyncClient(base_url=self._base_url, timeout=120.0) as client:
             resp = await client.post(
@@ -64,7 +64,7 @@ class OllamaProvider:
             content: str = resp.json()["message"]["content"]
             return content
 
-    @observe(name="ollama.astream", capture_input=False, capture_output=False)
+    @observe(name="ollama.astream")
     async def astream(
         self,
         messages: list[Message],

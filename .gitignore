@@ -68,6 +68,3 @@ huggingface/
 # --- Logs ---
 logs/
 *.log
-
-#claude
-.claude

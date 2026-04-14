@@ -113,9 +113,8 @@ What happens when you add a document. Each step points at the code so you can di
    - `require_api_key` (constant-time compare in `security.py`) — MTC-07.
    - Rate-limit 20/min/IP — MTC-08.
    - Generates a new `session_id` if one isn't supplied, then streams `_event_stream()` as SSE.
-   - Free-text (`question`) is never logged verbatim — `hash_text()` emits `sha256:<12hex>:len=<n>` so operators can still group repeat requests.
 
-4. **LangGraph invoke.** `apps/api/src/graph/build.py` runs the state machine with a Langfuse callback attached. To make the LangChain callback spans and the `@observe()`-decorated LLM spans share **one** trace, `_event_stream()` wraps `graph.astream()` in an enclosing OTEL span via `lf.start_as_current_observation(name="chat-turn", input={"q_hash": ...})` plus `propagate_attributes(session_id=..., user_id="anonymous", tags=[env, llm_provider])`. Without this wrapper each provider call would create its own root trace and session/tags would never attach (Langfuse v4 behavior).
+4. **LangGraph invoke.** `apps/api/src/graph/build.py` runs the state machine with a Langfuse callback attached. Tags: `env`, `llm_provider`. Metadata: `langfuse_session_id`, `langfuse_user_id`.
 
 **Graph nodes** (`apps/api/src/graph/nodes.py`):
 
@@ -141,15 +140,7 @@ query
 
 5. **SSE stream back.** Nodes emit `start / token / citations / grade / retry / done / error` events. Frontend parses in `use-conversations.ts:parseSseChunk()` and patches the assistant message live. `retry` events reset the streamed content so the user sees one clean answer after the loop.
 
-6. **Observability + PII posture.** Every node is a Langfuse span; `@observe` on the LLM provider records token usage; `session_id` groups the full conversation; thumbs up/down in the UI posts back as a Langfuse score. Open http://localhost:3002 → Traces to watch it in real time.
-
-   **Free-text is redacted on the way out**, two layers deep, so neither logs nor the Langfuse store ever see raw user questions, rewritten queries, retrieved context, or model answers:
-
-   - `apps/api/src/observability/redact.py:mask_payload()` is registered as the Langfuse client's global `mask=` hook (`observability/langfuse.py`). It replaces every span `input` / `output` payload with `<redacted>` before it leaves the process. Token counts, model names, span shape, timings, and scores are untouched — only the free-text blobs are nuked.
-   - Provider `@observe()` decorators in `llm/anthropic.py`, `llm/openai.py`, and `llm/ollama.py` pass `capture_input=False, capture_output=False` so the messages list and the generated string are never handed to Langfuse in the first place (defense in depth — if `mask_payload` ever regresses, nothing leaks).
-   - INFO logs in `routes/chat.py`, `routes/search.py`, and `graph/nodes.py:rewrite_query` use `hash_text()` instead of `%r` for questions and rewrites. What you see in `uvicorn` stdout is `q=sha256:a1b2c3d4e5f6:len=42` — enough to correlate, impossible to read.
-
-   Trade-off: because input/output is masked, the Langfuse UI no longer shows the actual question or answer on a trace — you see the DAG, timings, token counts, and the `q_hash`. For debugging a specific user complaint, correlate via `session_id` and the `q_hash` from the API logs.
+6. **Observability.** Every node is a Langfuse span; `@observe` on the LLM provider records token usage; `session_id` groups the full conversation; thumbs up/down in the UI posts back as a Langfuse score. Open http://localhost:3002 → Traces to watch it in real time.
 
 ---
 
@@ -284,6 +275,4 @@ Copy-paste-ready. Each task says **do this**, **verify that**, and **which part 
 | Re-ingesting a file keeps creating new points              | `EMBED_PROVIDER` didn't change silently? `source_uri` stable? → run `ingestion-debugger`. |
 | Chat answers "I don't have enough information" for known-good questions | Collection name mismatch — probably wrong `EMBED_PROVIDER`. Check `curl http://localhost:6333/collections`. |
 | Langfuse UI has no new traces                              | `LANGFUSE_*` env vars set? `langfuse-worker` healthy in `docker ps`?                 |
-| Langfuse trace shows `<redacted>` for input/output         | **Expected.** `mask_payload` + `capture_input=False` nuke free-text on purpose. Use `session_id` + the `q_hash` from api logs to correlate. |
-| Multiple root traces per chat turn instead of one          | The `start_as_current_observation("chat-turn")` wrapper in `routes/chat.py:_event_stream()` isn't firing — usually means `get_langfuse()` returned None (keys not set). |
 | Eval regression after a retrieval tweak                    | Run `/eval` to quantify, then revert or hand to `retrieval-tuner`.                   |

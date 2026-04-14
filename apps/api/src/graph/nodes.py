@@ -7,7 +7,6 @@ from src.config import get_settings
 from src.graph.state import Citation, GraphState
 from src.llm.factory import get_llm
 from src.llm.protocol import Message
-from src.observability.redact import hash_text
 from src.retrieval.hybrid import hybrid_search
 from src.retrieval.rerank import rerank as rerank_chunks
 from src.retrieval.types import ScoredChunk
@@ -90,7 +89,7 @@ async def rewrite_query(state: GraphState, writer: StreamWriter) -> dict[str, An
         writer({"type": "retry", "rewrite_count": count + 1})
 
     question = state["question"]
-    log.info("rewrite_query question=%s is_retry=%s", hash_text(question), is_retry)
+    log.info("rewrite_query question=%r is_retry=%s", question, is_retry)
     system_prompt = REWRITE_RETRY_SYSTEM_PROMPT if is_retry else REWRITE_SYSTEM_PROMPT
     llm = get_llm()
     rewritten = await llm.generate(
@@ -101,7 +100,7 @@ async def rewrite_query(state: GraphState, writer: StreamWriter) -> dict[str, An
         max_tokens=128,
     )
     cleaned = rewritten.strip().strip('"').strip("'") or question
-    log.info("rewrite_query result=%s count=%d", hash_text(cleaned), count + 1)
+    log.info("rewrite_query result=%r count=%d", cleaned, count + 1)
     return {"rewritten_question": cleaned, "rewrite_count": count + 1}
 
 
