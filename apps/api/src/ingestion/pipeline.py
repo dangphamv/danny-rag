@@ -7,8 +7,9 @@ from qdrant_client.http.models import Distance, PointStruct, VectorParams
 
 from src.config import get_settings
 from src.ingestion.chunker import Chunk, chunk_document, derive_doc_id
+from src.ingestion.enrichment import enrich_chunks
 from src.ingestion.loaders import load_document
-from src.llm.factory import get_embedder
+from src.llm.factory import get_embedder, get_llm
 from src.retrieval.sparse import invalidate_bm25_cache
 
 log = logging.getLogger(__name__)
@@ -97,26 +98,44 @@ async def ingest_document(
     try:
         await ensure_collection(client)
 
-        # MTC-02: idempotency. Fetch existing points by ID and compare content_hash.
+        # MTC-02 / ADR-0011: idempotency. Compare (content_hash, enrichment_version)
+        # against existing points. When enrichment is off, enrichment_version is not
+        # part of the comparison — pre-enrichment points stay stable.
         point_ids = [c.point_id for c in chunks]
         existing = await client.retrieve(
             collection_name=settings.qdrant_collection,
             ids=point_ids,
-            with_payload=["content_hash"],
+            with_payload=["content_hash", "enrichment_version"],
             with_vectors=False,
         )
-        existing_hashes = {
-            str(p.id): (p.payload or {}).get("content_hash")
-            for p in existing
+        existing_payloads: dict[str, dict[str, object]] = {
+            str(p.id): dict(p.payload or {}) for p in existing
         }
 
-        to_upsert: list[Chunk] = [
-            c for c in chunks if existing_hashes.get(c.point_id) != c.content_hash
-        ]
+        want_version = settings.ingest_enrich_version if settings.ingest_enrich else None
+
+        def _needs_upsert(chunk: Chunk) -> bool:
+            prior = existing_payloads.get(chunk.point_id)
+            if prior is None:
+                return True
+            if prior.get("content_hash") != chunk.content_hash:
+                return True
+            return want_version is not None and prior.get("enrichment_version") != want_version
+
+        to_upsert: list[Chunk] = [c for c in chunks if _needs_upsert(c)]
         skipped = len(chunks) - len(to_upsert)
 
+        if to_upsert and settings.ingest_enrich:
+            to_upsert = await enrich_chunks(
+                to_upsert,
+                llm=get_llm(),
+                version=settings.ingest_enrich_version,
+                concurrency=settings.ingest_enrich_concurrency,
+                max_tokens=settings.ingest_enrich_max_tokens,
+            )
+
         if to_upsert:
-            vectors = await embedder.embed_batch([c.text for c in to_upsert])
+            vectors = await embedder.embed_batch([c.embed_text() for c in to_upsert])
             points = [
                 PointStruct(id=c.point_id, vector=v, payload=c.payload())
                 for c, v in zip(to_upsert, vectors, strict=True)

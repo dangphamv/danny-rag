@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     upload_max_bytes: int = 25 * 1024 * 1024  # MTC-09
     ingest_timeout_seconds: int = 60  # MTC-09
     ingest_max_concurrent: int = 2  # MTC-09
+
+    # LLM-enriched ingestion (ADR-0011). Opt-in. Version is stored in each
+    # point's payload and compared during dedupe; bumping it forces re-enrich.
+    ingest_enrich: bool = False
+    ingest_enrich_version: str = "v1"
+    ingest_enrich_concurrency: int = 5
+    ingest_enrich_max_tokens: int = 1024  # must stay ≤ max_output_tokens (MTC-10)
     upload_allowed_mime_types: tuple[str, ...] = (  # MTC-09
         "application/pdf",
         "text/markdown",
