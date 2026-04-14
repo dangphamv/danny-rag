@@ -1,11 +1,13 @@
 import asyncio
 import logging
 import tempfile
+from contextlib import ExitStack
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from langfuse import propagate_attributes
 from pydantic import BaseModel
 from qdrant_client.http.exceptions import UnexpectedResponse
 
@@ -13,6 +15,7 @@ from src.config import get_settings
 from src.ingestion.loaders import SUPPORTED_SUFFIXES
 from src.ingestion.pipeline import IngestionResult, ingest_document
 from src.limits import limiter
+from src.observability.langfuse import get_langfuse
 from src.retrieval.dense import qdrant_client
 from src.security import require_api_key
 
@@ -203,28 +206,63 @@ async def ingest(
     original_name = file.filename or "unknown"
     upload_uri = f"upload://{original_name}"
 
+    lf = get_langfuse()
     try:
         async with _get_ingest_semaphore():  # MTC-09: max 2 concurrent
-            try:
-                result: IngestionResult = await asyncio.wait_for(
-                    ingest_document(
-                        tmp_path,
-                        source_uri=upload_uri,
-                        title=original_name,
-                    ),
-                    timeout=settings.ingest_timeout_seconds,
-                )
-            except TimeoutError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_408_REQUEST_TIMEOUT,
-                    detail=f"ingestion exceeded {settings.ingest_timeout_seconds}s",
-                ) from exc
-            except ValueError as exc:
-                # loaders.py raises ValueError on unsupported suffix or empty content
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=str(exc),
-                ) from exc
+            # Root Langfuse span for the upload. Any @observe-wrapped work
+            # (enrichment, embedding, LLM calls) nests under this observation
+            # so per-ingest cost and spans land in a single trace. Mirrors the
+            # chat.py pattern at routes/chat.py:51-65.
+            with ExitStack() as stack:
+                obs = None
+                if lf is not None:
+                    obs = stack.enter_context(
+                        lf.start_as_current_observation(
+                            name="ingest.upload",
+                            input={
+                                "filename": original_name,
+                                "content_type": file.content_type,
+                                "size_bytes": tmp_path.stat().st_size,
+                            },
+                        )
+                    )
+                    stack.enter_context(
+                        propagate_attributes(
+                            tags=[settings.env, "ingest"],
+                        )
+                    )
+                try:
+                    result: IngestionResult = await asyncio.wait_for(
+                        ingest_document(
+                            tmp_path,
+                            source_uri=upload_uri,
+                            title=original_name,
+                        ),
+                        timeout=settings.ingest_timeout_seconds,
+                    )
+                except TimeoutError as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_408_REQUEST_TIMEOUT,
+                        detail=f"ingestion exceeded {settings.ingest_timeout_seconds}s",
+                    ) from exc
+                except ValueError as exc:
+                    # loaders.py raises ValueError on unsupported suffix or empty content
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=str(exc),
+                    ) from exc
+                if obs is not None:
+                    try:
+                        obs.update(
+                            output={
+                                "doc_id": result.doc_id,
+                                "total_chunks": result.total_chunks,
+                                "upserted": result.upserted,
+                                "skipped_unchanged": result.skipped_unchanged,
+                            }
+                        )
+                    except Exception as exc:
+                        log.debug("langfuse observation.update failed: %s", exc)
     finally:
         tmp_path.unlink(missing_ok=True)
 

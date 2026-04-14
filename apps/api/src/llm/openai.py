@@ -1,7 +1,8 @@
+import logging
 from collections.abc import AsyncIterator
 from typing import cast
 
-from langfuse import observe
+from langfuse import get_client, observe
 from openai import AsyncOpenAI, AsyncStream
 from openai.types.chat import ChatCompletionChunk
 
@@ -9,6 +10,8 @@ from src.llm.protocol import Message
 
 # MTC-10: hard ceiling on output tokens.
 HARD_MAX_TOKENS = 1024
+
+log = logging.getLogger(__name__)
 
 
 class OpenAIEmbedder:
@@ -26,15 +29,25 @@ class OpenAIEmbedder:
     def model_name(self) -> str:
         return self._model
 
+    @observe(as_type="generation", name="openai.embed")
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
         out: list[list[float]] = []
         batch_size = 100
+        total_prompt_tokens = 0
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
             resp = await self._client.embeddings.create(model=self._model, input=batch)
             out.extend(d.embedding for d in resp.data)
+            total_prompt_tokens += resp.usage.prompt_tokens
+        try:
+            get_client().update_current_generation(
+                model=self._model,
+                usage_details={"input": total_prompt_tokens, "output": 0},
+            )
+        except Exception as exc:
+            log.debug("langfuse update_current_generation failed: %s", exc)
         return out
 
 
