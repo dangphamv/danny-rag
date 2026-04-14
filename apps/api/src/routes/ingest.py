@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from langfuse import propagate_attributes
 from pydantic import BaseModel
 from qdrant_client.http.exceptions import UnexpectedResponse
+from qdrant_client.http.models import FieldCondition, Filter, FilterSelector, MatchValue
 
 from src.config import get_settings
 from src.ingestion.loaders import SUPPORTED_SUFFIXES
@@ -17,6 +18,7 @@ from src.ingestion.pipeline import IngestionResult, ingest_document
 from src.limits import limiter
 from src.observability.langfuse import get_langfuse
 from src.retrieval.dense import qdrant_client
+from src.retrieval.sparse import invalidate_bm25_cache
 from src.security import require_api_key
 
 log = logging.getLogger(__name__)
@@ -90,6 +92,11 @@ class IngestResponse(BaseModel):
     total_chunks: int
     upserted: int
     skipped_unchanged: int
+
+
+class DeleteDocResponse(BaseModel):
+    doc_id: str
+    deleted: int
 
 
 class CorpusDocument(BaseModel):
@@ -179,6 +186,56 @@ async def list_corpus(
         total_chunks=total,
         documents=[CorpusDocument(**d) for d in documents],
     )
+
+
+@router.delete("/{doc_id}", response_model=DeleteDocResponse)
+@limiter.limit(INGEST_RATE_LIMIT)  # MTC-08: reuse ingest rate limit (5/min/IP)
+async def delete_document(
+    request: Request,  # required by slowapi
+    doc_id: str,
+    _: None = Depends(require_api_key),  # MTC-07
+) -> DeleteDocResponse:
+    """Delete every point whose payload `doc_id` matches.
+
+    Idempotent: deleting a non-existent doc_id returns 404 rather than silently
+    succeeding, so callers can distinguish "no-op" from "done". Invalidates the
+    in-memory BM25 cache so the next chat query sees the shrunken corpus.
+    """
+    settings = get_settings()
+    flt = Filter(
+        must=[FieldCondition(key="doc_id", match=MatchValue(value=doc_id))]
+    )
+    log.info("delete_document doc_id=%s", doc_id)
+
+    try:
+        async with qdrant_client() as client:
+            count_resp = await client.count(
+                collection_name=settings.qdrant_collection,
+                count_filter=flt,
+                exact=True,
+            )
+            matched = count_resp.count
+            if matched == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"no points found for doc_id={doc_id}",
+                )
+            await client.delete(
+                collection_name=settings.qdrant_collection,
+                points_selector=FilterSelector(filter=flt),
+                wait=True,
+            )
+    except UnexpectedResponse as exc:
+        if exc.status_code == 404:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="collection does not exist",
+            ) from exc
+        raise
+
+    invalidate_bm25_cache()
+    log.info("delete_document done doc_id=%s deleted=%d", doc_id, matched)
+    return DeleteDocResponse(doc_id=doc_id, deleted=matched)
 
 
 @router.post("", response_model=IngestResponse)

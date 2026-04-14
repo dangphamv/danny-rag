@@ -4,8 +4,10 @@ The actual ingestion pipeline is mocked — these tests verify the request
 plumbing: API key auth, MIME validation, size cap, and timeout handling.
 """
 
+from contextlib import asynccontextmanager
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -136,3 +138,50 @@ def test_ingest_timeout_returns_408(client: TestClient) -> None:
             files={"file": ("slow.txt", b"hi", "text/plain")},
         )
     assert response.status_code == 408
+
+
+def _fake_qdrant_client(matched: int) -> object:
+    """Return a context manager yielding a Qdrant client stub for DELETE tests."""
+    client = SimpleNamespace(
+        count=AsyncMock(return_value=SimpleNamespace(count=matched)),
+        delete=AsyncMock(return_value=None),
+    )
+
+    @asynccontextmanager
+    async def _cm():
+        yield client
+
+    return _cm
+
+
+def test_delete_document_requires_api_key(client: TestClient) -> None:
+    response = client.delete("/ingest/abc123")
+    assert response.status_code == 401
+
+
+def test_delete_document_removes_all_matching_points(client: TestClient) -> None:
+    fake_cm = _fake_qdrant_client(matched=3)
+    invalidate = MagicMock()
+    with (
+        patch("src.routes.ingest.qdrant_client", side_effect=fake_cm),
+        patch("src.routes.ingest.invalidate_bm25_cache", side_effect=invalidate),
+    ):
+        response = client.delete(
+            "/ingest/573013e6a628b8aa",
+            headers={"X-API-Key": API_KEY},
+        )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body == {"doc_id": "573013e6a628b8aa", "deleted": 3}
+    invalidate.assert_called_once()
+
+
+def test_delete_document_404_when_not_found(client: TestClient) -> None:
+    fake_cm = _fake_qdrant_client(matched=0)
+    with patch("src.routes.ingest.qdrant_client", side_effect=fake_cm):
+        response = client.delete(
+            "/ingest/nonexistent",
+            headers={"X-API-Key": API_KEY},
+        )
+    assert response.status_code == 404
+    assert "nonexistent" in response.json()["detail"]
