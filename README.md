@@ -1,26 +1,52 @@
-# danny_rag
+# AgenticRAG (danny-rag)
 
-A production-shaped RAG knowledge chatbot — built end-to-end as a learning project.
+A RAG chatbot that grades its own answers and goes back for better sources when the answer isn't grounded.
 
-**Stack** (full reasoning in [BRD-01](docs/01_BRD/BRD-01_rag_knowledge_chatbot/BRD-01_rag_knowledge_chatbot.md)):
+**Live demo:** https://danny-rag-web.vercel.app
 
-- **Backend**: FastAPI + LangGraph + Qdrant (hybrid BM25+dense+RRF) + cross-encoder rerank + DeepEval
-- **Frontend**: Next.js 15 (App Router) + Vercel AI SDK `useChat`
-- **LLM providers**: Anthropic Claude / OpenAI / Ollama (pluggable via env)
-- **Embeddings**: `text-embedding-3-small` (1536d, locked)
-- **Observability**: Langfuse v3 self-hosted
-- **Hosts**: Railway (api + Langfuse), Vercel (web), Qdrant Cloud
+<!-- TODO: 20–30s GIF: question → low grounding score → retry → cited answer. Save as docs/demo.gif -->
+<!-- ![demo](docs/demo.gif) -->
+
+## How it works
+
+```mermaid
+flowchart LR
+  Q[Question] --> RW[Rewrite query]
+  RW --> H[Hybrid retrieve<br/>dense + BM25, RRF k=60]
+  H --> RR[Cross-encoder rerank<br/>bge-reranker-base]
+  RR --> G[Generate]
+  G --> S{Grounding<br/>≥ 0.7?}
+  S -- "no (max 1 retry)" --> RW
+  S -- yes --> A[Answer + sources]
+```
+
+- **Orchestration:** LangGraph. The `self_grade` node scores how well the answer is supported by the retrieved context. Below **0.7**, the graph rewrites the query and retrieves again, capped at one retry.
+- **Retrieval:** dense vectors (`text-embedding-3-small`) in Qdrant and BM25 run in parallel, fused with Reciprocal Rank Fusion, then reranked by a cross-encoder.
+- **Streaming:** FastAPI streams tokens and `retry` events over SSE to a Next.js 15 chat UI built on the Vercel AI SDK `useChat`.
+- **Providers:** Anthropic, OpenAI or Ollama, switched by env var.
+- **Quality:** every node is traced in self-hosted Langfuse; offline evals run on DeepEval.
+- **Decisions:** 11 ADRs in [`docs/adr/`](docs/adr/) cover Qdrant vs pgvector, hybrid search, reranking, eval tooling and more.
+
+## Results
+
+<!-- TODO: fill from your DeepEval / Langfuse runs -->
+| Metric | Without self-grade | With self-grade loop |
+|---|---|---|
+| Faithfulness | – | – |
+| Answer relevancy | – | – |
+| Share of queries that retry | – | – |
+| p50 latency | – | – |
 
 ## Repository Layout
 
 ```
-danny_rag/
+danny-rag/
 ├── apps/
 │   ├── api/        # FastAPI backend (uv-managed Python 3.12)
 │   └── web/        # Next.js 15 frontend (pnpm) — created in milestone 9
 ├── docs/
 │   ├── 01_BRD/     # Business requirements (BRD-01 lives here)
-│   └── adr/        # 10 Architecture Decision Records (M14)
+│   └── adr/        # 11 Architecture Decision Records
 ├── .claude/        # project subagents + slash commands (see .claude/README.md)
 ├── .mcp.json       # project-scoped MCP servers (context7, postgres, playwright)
 ├── docker-compose.yml
@@ -103,7 +129,7 @@ See [`docs/DEPLOY.md`](docs/DEPLOY.md) for the full Railway + Vercel + Qdrant Cl
 
 ### 5. Architectural decisions
 
-10 ADRs in [`docs/adr/`](docs/adr/) document the trade-offs that shaped this stack — Qdrant vs pgvector, hybrid retrieval, the LLM Protocol leakage points, the shared-Postgres mitigation triggers, and so on. Start with [ADR-0001](docs/adr/0001-record-architecture-decisions.md) for the format and meta-decision.
+11 ADRs in [`docs/adr/`](docs/adr/) document the trade-offs that shaped this stack — Qdrant vs pgvector, hybrid retrieval, the LLM Protocol leakage points, the shared-Postgres mitigation triggers, and so on. Start with [ADR-0001](docs/adr/0001-record-architecture-decisions.md) for the format and meta-decision.
 
 ## Working with this repo in Claude Code
 
